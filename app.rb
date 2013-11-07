@@ -98,6 +98,15 @@ if ENV["ENABLE_IDMAP_LOGGING"]
 
 end
 
+require 'i18n'
+require 'i18n/backend/fallbacks'
+
+I18n::Backend::Simple.send(:include, I18n::Backend::Fallbacks)
+I18n.load_path = Dir['config/locales/*.yml']
+I18n.backend.load_translations
+I18n.default_locale = :ru
+I18n.locale = :ru
+
 # Enable the identity map. The middleware ensures that the identity map is
 # cleared for every request.
 Mongoid.identity_map_enabled = true

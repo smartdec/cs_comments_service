@@ -1,0 +1,14 @@
+ru:
+  mongoid:
+    attributes:
+      comment_thread:
+        title: "Тема сообщения"
+        body: "Сообщение"
+    errors:
+      models:
+        comment_thread:
+          attributes:
+            title:
+              blank: "не может быть пустой."
+            body:
+              blank: "не может быть пустым."
