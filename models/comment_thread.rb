@@ -1,13 +1,10 @@
+# -*- coding: utf-8 -*-
 require 'new_relic/agent/method_tracer'
 require_relative 'content'
 
 class CommentThread < Content
 
   include Mongoid::Timestamps
-  include Mongoid::TaggableWithContext
-  include Mongoid::TaggableWithContext::AggregationStrategy::RealTime
-
-  taggable separator: ',', default: []
 
   voteable self, :up => +1, :down => -1
 
@@ -30,10 +27,8 @@ class CommentThread < Content
   include Tire::Model::Callbacks
 
   mapping do
-    indexes :title, type: :string, analyzer: :snowball, boost: 5.0, stored: true, term_vector: :with_positions_offsets
-    indexes :body, type: :string, analyzer: :snowball, stored: true, term_vector: :with_positions_offsets
-    indexes :tags_in_text, type: :string, as: 'tags_array', index: :analyzed
-    indexes :tags_array, type: :string, as: 'tags_array', index: :not_analyzed, included_in_all: false
+    indexes :title, type: :string, analyzer: :english, boost: 5.0, stored: true, term_vector: :with_positions_offsets
+    indexes :body, type: :string, analyzer: :english, stored: true, term_vector: :with_positions_offsets
     indexes :created_at, type: :date, included_in_all: false
     indexes :updated_at, type: :date, included_in_all: false
     indexes :last_activity_at, type: :date, included_in_all: false
@@ -61,9 +56,6 @@ class CommentThread < Content
   validates_presence_of :commentable_id
   validates_presence_of :author, autosave: false
 
-  validate :tag_names_valid
-  validate :tag_names_unique
-
   before_create :set_last_activity_at
   before_update :set_last_activity_at, :unless => lambda { closed_changed? }
 
@@ -78,7 +70,6 @@ class CommentThread < Content
     c.commentable_id = options[:commentable_id] || "commentable_id"
     c.course_id = options[:course_id] || "course_id"
     c.author = options[:author] || User.first
-    c.tags = options[:tags] || "test-tag-1, test-tag-2"
     c.save!
     c
   end
@@ -108,9 +99,8 @@ class CommentThread < Content
         
     search = Tire::Search::Search.new 'comment_threads'
 
-    search.query {|query| query.text :_all, params["text"]} if params["text"]
+    search.query {|query| query.match [:title, :body], params["text"]} if params["text"]
     search.highlight({title: { number_of_fragments: 0 } } , {body: { number_of_fragments: 0 } }, options: { tag: "<highlight>" })
-    search.filter(:bool, :must => params["tags"].split(/,/).map{ |tag| { :term => { :tags_array => tag } } }) if params["tags"]
     search.filter(:term, commentable_id: params["commentable_id"]) if params["commentable_id"]
     search.filter(:terms, commentable_id: params["commentable_ids"]) if params["commentable_ids"]
     search.filter(:term, course_id: params["course_id"]) if params["course_id"]
@@ -125,74 +115,61 @@ class CommentThread < Content
     search.sort {|sort| sort.by sort_key, sort_order} if sort_key && sort_order #TODO should have search option 'auto sort or sth'
 
     #again, b/c there is no relationship in ordinality, we cannot paginate if it's a text query
-    
-    if not params["text"]
-      search.size per_page
-      search.from per_page * (page - 1)
-    end
-
     results = search.results
-    
-    #if this is a search query, then also search the comments and harvest the matching comments
-    if params["text"]
 
-      search = Tire::Search::Search.new 'comments'
-      search.query {|query| query.text :_all, params["text"]} if params["text"]
-      search.filter(:term, course_id: params["course_id"]) if params["course_id"]
-      search.size CommentService.config["max_deep_search_comment_count"].to_i
-      
-      #unforutnately, we cannot paginate here, b/c we don't know how the ordinality is totally
-      #unrelated to that of threads
-      
-      c_results = comment_ids = comments = thread_ids = nil
-      self.class.trace_execution_scoped(['Custom/perform_search/collect_comment_search_results']) do
-        c_results = search.results
-        comment_ids = c_results.collect{|c| c.id}.uniq
-      end
-      self.class.trace_execution_scoped(['Custom/perform_search/collect_comment_thread_ids']) do
-        comments = Comment.where(:id.in => comment_ids)
-        thread_ids = comments.collect{|c| c.comment_thread_id}
-      end
+    search = Tire::Search::Search.new 'comments'
+    search.query {|query| query.match :body, params["text"]} if params["text"]
+    search.filter(:term, course_id: params["course_id"]) if params["course_id"]
+    search.size CommentService.config["max_deep_search_comment_count"].to_i
 
-      #thread_ids = c_results.collect{|c| c.comment_thread_id}
-      #as soon as we can add comment thread id to the ES index, via Tire updgrade, we'll 
-      #use ES instead of mongo to collect the thread ids
-     
-      #use the elasticsearch index instead to avoid DB hit
-      
-      self.class.trace_execution_scoped(['Custom/perform_search/collect_unique_thread_ids']) do
-        original_thread_ids = results.collect{|r| r.id}
+    #unforutnately, we cannot paginate here, b/c we don't know how the ordinality is totally
+    #unrelated to that of threads
 
-        #now add the original search thread ids
-        thread_ids += original_thread_ids
-        
-        thread_ids = thread_ids.uniq
-      end
-
-      #now run one more search to harvest the threads and filter by group
-      search = Tire::Search::Search.new 'comment_threads'
-      search.filter(:terms, :thread_id => thread_ids)
-      search.filter(:terms, commentable_id: params["commentable_ids"]) if params["commentable_ids"]
-      search.filter(:term, course_id: params["course_id"]) if params["course_id"]
-
-      search.size per_page
-      search.from per_page * (page - 1)
-
-      if params["group_id"]
-
-        search.filter :or, [
-          {:not => {:exists => {:field => :group_id}}},
-          {:term => {:group_id => params["group_id"]}}
-
-        ]
-      end
-
-      search.sort {|sort| sort.by sort_key, sort_order} if sort_key && sort_order 
-      results = search.results
-
+    c_results = comment_ids = comments = thread_ids = nil
+    self.class.trace_execution_scoped(['Custom/perform_search/collect_comment_search_results']) do
+      c_results = search.results
+      comment_ids = c_results.collect{|c| c.id}.uniq
+    end
+    self.class.trace_execution_scoped(['Custom/perform_search/collect_comment_thread_ids']) do
+      comments = Comment.where(:id.in => comment_ids)
+      thread_ids = comments.collect{|c| c.comment_thread_id.to_s}
     end
 
-    results
+    #thread_ids = c_results.collect{|c| c.comment_thread_id}
+    #as soon as we can add comment thread id to the ES index, via Tire updgrade, we'll 
+    #use ES instead of mongo to collect the thread ids
+
+    #use the elasticsearch index instead to avoid DB hit
+
+    self.class.trace_execution_scoped(['Custom/perform_search/collect_unique_thread_ids']) do
+      original_thread_ids = results.collect{|r| r.id}
+
+      #now add the original search thread ids
+      thread_ids += original_thread_ids
+
+      thread_ids = thread_ids.uniq
+    end
+    
+    #now run one more search to harvest the threads and filter by group
+    search = Tire::Search::Search.new 'comment_threads'
+    search.filter(:terms, :thread_id => thread_ids)
+    search.filter(:terms, commentable_id: params["commentable_ids"]) if params["commentable_ids"]
+    search.filter(:term, course_id: params["course_id"]) if params["course_id"]
+
+    search.size per_page
+    search.from per_page * (page - 1)
+
+    if params["group_id"]
+
+      search.filter :or, [
+        {:not => {:exists => {:field => :group_id}}},
+        {:term => {:group_id => params["group_id"]}}
+
+      ]
+    end
+
+    search.sort {|sort| sort.by sort_key, sort_order} if sort_key && sort_order 
+    {results: search.results, total_results: thread_ids.length}
   end
 
   def activity_since(from_time=nil)
@@ -248,7 +225,7 @@ class CommentThread < Content
     #  abuse_flaggers
     #    from original document 
     #  tags
-    #    from orig doc tags_array
+    #    deprecated - empty array
     #  type
     #    hardcoded "thread"
     #  group_id
@@ -263,16 +240,12 @@ class CommentThread < Content
                             "username" => author_username,
                             "votes" => votes.slice(*%w[count up_count down_count point]),
                             "abuse_flaggers" => abuse_flaggers,
-                            "tags" => tags_array,
+                            "tags" => [],
                             "type" => "thread",
                             "group_id" => group_id,
                             "pinned" => pinned?,
                             "comments_count" => comment_count)
     
-  end
-
-  def self.tag_name_valid?(tag)
-    !!(tag =~ RE_TAG)
   end
 
   def comment_thread_id
@@ -282,25 +255,6 @@ class CommentThread < Content
   
 private
 
-  RE_HEADCHAR = /[a-z0-9]/
-  RE_ENDONLYCHAR = /\+/
-  RE_ENDCHAR = /[a-z0-9\#]/
-  RE_CHAR = /[a-z0-9\-\#\.]/
-  RE_WORD = /#{RE_HEADCHAR}(((#{RE_CHAR})*(#{RE_ENDCHAR})+)?(#{RE_ENDONLYCHAR})*)?/
-  RE_TAG = /^#{RE_WORD}( #{RE_WORD})*$/
-
-  def tag_names_valid
-    unless tags_array.all? {|tag| self.class.tag_name_valid? tag}
-      errors.add :tag, "can consist of words, numbers, dashes and spaces only and cannot start with dash"
-    end
-  end
-
-  def tag_names_unique
-    unless tags_array.uniq.size == tags_array.size
-      errors.add :tags, "must be unique"
-    end
-  end
-
   def set_last_activity_at
     self.last_activity_at = Time.now.utc unless last_activity_at_changed?
   end
@@ -309,7 +263,9 @@ private
     subscriptions.delete_all
   end
 
-  include ::NewRelic::Agent::MethodTracer
-  add_method_tracer :perform_search
+  class << self
+    include ::NewRelic::Agent::MethodTracer
+    add_method_tracer :perform_search, 'Custom/perform_search'
+  end
 
 end

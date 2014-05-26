@@ -1,24 +1,9 @@
 require 'spec_helper'
+require 'unicode_shared_examples'
 
 describe CommentThread do
-  it "validates tag name" do
-    CommentThread.tag_name_valid?("a++").should be_true
-    CommentThread.tag_name_valid?("a++ b++ c++").should be_true
-    CommentThread.tag_name_valid?("a#b+").should be_true
-    CommentThread.tag_name_valid?("a##").should be_true
-    CommentThread.tag_name_valid?("a#-b#").should be_true
-    CommentThread.tag_name_valid?("000a123").should be_true
-    CommentThread.tag_name_valid?("artificial-intelligence").should be_true
-    CommentThread.tag_name_valid?("artificial intelligence").should be_true
-    CommentThread.tag_name_valid?("well-known formulas").should be_true
-
-    CommentThread.tag_name_valid?("a#+b#").should be_false
-    CommentThread.tag_name_valid?("a# +b#").should be_false
-    CommentThread.tag_name_valid?("--a").should be_false
-    CommentThread.tag_name_valid?("artificial_intelligence").should be_false
-    CommentThread.tag_name_valid?("#this-is-a-tag").should be_false
-    CommentThread.tag_name_valid?("_this-is-a-tag").should be_false
-    CommentThread.tag_name_valid?("this-is+a-tag").should be_false
+  let(:author) do
+    create_test_user(42)
   end
 
   context "endorsed?" do
@@ -96,5 +81,13 @@ describe CommentThread do
     end
   end
 
+  def test_unicode_data(text)
+    thread = make_thread(author, text, "unicode_course", commentable_id: "unicode_commentable")
+    retrieved = CommentThread.find(thread._id)
+    retrieved.title.should == text
+    retrieved.body.should == text
+  end
+
+  include_examples "unicode data"
 end
 

@@ -1,7 +1,10 @@
 require 'spec_helper'
+require 'unicode_shared_examples'
 
 describe "app" do
   describe "comment threads" do
+
+    before(:each) { set_api_key_header }
 
     describe "GET /api/v1/threads" do
 
@@ -22,7 +25,7 @@ describe "app" do
           rs = thread_result course_id: "abc", sort_order: "asc"
           rs.length.should == 2 
           rs.each_with_index { |res, i|
-            check_thread_result(nil, @threads["t#{i+1}"], res)
+            check_thread_result_json(nil, @threads["t#{i+1}"], res)
             res["course_id"].should == "abc"
           }
         end
@@ -41,8 +44,8 @@ describe "app" do
           @threads["t4"].save!
           rs = thread_result course_id: "course1", commentable_ids: "commentable1,commentable3"
           rs.length.should == 2
-          check_thread_result(nil, @threads["t3"], rs[0])
-          check_thread_result(nil, @threads["t1"], rs[1])
+          check_thread_result_json(nil, @threads["t3"], rs[0])
+          check_thread_result_json(nil, @threads["t1"], rs[1])
         end
         it "returns only threads where course id and group id match" do
           @threads["t1"].course_id = "omg"
@@ -53,7 +56,7 @@ describe "app" do
           @threads["t2"].save!
           rs = thread_result course_id: "omg", group_id: 100
           rs.length.should == 1
-          check_thread_result(nil, @threads["t1"], rs.first)
+          check_thread_result_json(nil, @threads["t1"], rs.first)
         end
         it "returns only threads where course id and group id match or group id is nil" do
           @threads["t1"].course_id = "omg"
@@ -66,7 +69,7 @@ describe "app" do
           rs = thread_result course_id: "omg", group_id: 100, sort_order: "asc"
           rs.length.should == 2 
           rs.each_with_index { |res, i|
-            check_thread_result(nil, @threads["t#{i+1}"], res)
+            check_thread_result_json(nil, @threads["t#{i+1}"], res)
             res["course_id"].should == "omg"
           }
         end
@@ -86,14 +89,14 @@ describe "app" do
             @threads["t1"].save!
             rs = thread_result course_id: DFLT_COURSE_ID, flagged: true
             rs.length.should == 1 
-            check_thread_result(nil, @threads["t1"], rs.first)
+            check_thread_result_json(nil, @threads["t1"], rs.first)
           end
           it "returns threads that have flagged comments" do
             @comments["t2 c3"].abuse_flaggers = [1]            
             @comments["t2 c3"].save!
             rs = thread_result course_id: DFLT_COURSE_ID, flagged: true
             rs.length.should == 1 
-            check_thread_result(nil, @threads["t2"], rs.first)
+            check_thread_result_json(nil, @threads["t2"], rs.first)
           end
           it "returns an empty result when no posts were flagged" do
             rs = thread_result course_id: DFLT_COURSE_ID, flagged: true
@@ -109,7 +112,7 @@ describe "app" do
           rs = thread_result course_id: "abc", user_id: "123", sort_order: "asc"
           rs.length.should == 2 
           rs.each_with_index { |result, i|
-            check_thread_result(user, @threads["t#{i+1}"], result)
+            check_thread_result_json(user, @threads["t#{i+1}"], result)
             result["course_id"].should == "abc"
             result["unread_comments_count"].should == 5
             result["read"].should == false
@@ -119,7 +122,7 @@ describe "app" do
           rs = thread_result course_id: "abc", user_id: "123", sort_order: "asc"
           rs.length.should == 2
           rs.each_with_index { |result, i|
-            check_thread_result(user, @threads["t#{i+1}"], result)
+            check_thread_result_json(user, @threads["t#{i+1}"], result)
           }
           rs[0]["read"].should == true
           rs[0]["unread_comments_count"].should == 0
@@ -131,7 +134,7 @@ describe "app" do
           rs = thread_result course_id: "abc", user_id: "123", sort_order: "asc"
           rs.length.should == 2
           rs.each_with_index { |result, i|
-            check_thread_result(user, @threads["t#{i+1}"], result)
+            check_thread_result_json(user, @threads["t#{i+1}"], result)
           }
           rs[0]["read"].should == false # no unread comments, but the thread itself was updated
           rs[0]["unread_comments_count"].should == 0
@@ -302,6 +305,15 @@ describe "app" do
         
       end
 
+      def test_unicode_data(text)
+        course_id = "unicode_course"
+        thread = make_thread(User.first, text, course_id, "unicode_commentable")
+        make_comment(User.first, thread, text)
+        result = thread_result(course_id: course_id).first
+        check_thread_result_json(nil, thread, result)
+      end
+
+      include_examples "unicode data"
     end
 
     describe "GET /api/v1/threads/:thread_id" do
@@ -320,7 +332,7 @@ describe "app" do
         get "/api/v1/threads/#{thread.id}"
         last_response.should be_ok
         response_thread = parse last_response.body
-        check_thread_result(nil, thread, response_thread)
+        check_thread_result_json(nil, thread, response_thread)
       end
 
       it "computes endorsed? correctly" do
@@ -332,7 +344,7 @@ describe "app" do
         last_response.should be_ok
         response_thread = parse last_response.body
         response_thread["endorsed"].should == true
-        check_thread_result(nil, thread, response_thread)
+        check_thread_result_json(nil, thread, response_thread)
       end
 
       # This is a test to ensure that the username is included even if the
@@ -360,35 +372,95 @@ describe "app" do
         thread = CommentThread.first
         get "/api/v1/threads/#{thread.id}", recursive: true
         last_response.should be_ok
-        check_thread_result(nil, thread, parse(last_response.body), true)
+        check_thread_result_json(nil, thread, parse(last_response.body))
+        check_thread_response_paging_json(thread, parse(last_response.body))
       end
 
-      it "returns 400 when the thread does not exist" do
-        get "/api/v1/threads/does_not_exist"
-        last_response.status.should == 400
-        get "/api/v1/threads/5016a3caec5eb9a12300000b1"
-        last_response.status.should == 400
-      end
-      
-      it "get information of a single comment thread with its tags" do
-        thread = CommentThread.new
-        thread.title = "new thread"
-        thread.body = "hahaah"
-        thread.course_id = "1"
-        thread.commentable_id = "1"
-        thread.author = User.first
-        thread.tags = "taga, tagb, tagc"
-        thread.save!
-        get "/api/v1/threads/#{thread.id}"
+      it "returns 404 when the thread does not exist" do
+        thread = CommentThread.first
+        path = "/api/v1/threads/#{thread.id}"
+        get path
         last_response.should be_ok
-        response_thread = parse last_response.body
-        check_thread_result(nil, thread, response_thread)
-        response_thread["tags"].length.should == 3
-        response_thread["tags"].should include "taga"
-        response_thread["tags"].should include "tagb"
-        response_thread["tags"].should include "tagc"
+        thread.destroy
+        get path
+        last_response.status.should == 404
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
+      end
+
+      def test_unicode_data(text)
+        thread = make_thread(User.first, text, "unicode_course", "unicode_commentable")
+        make_comment(User.first, thread, text)
+        get "/api/v1/threads/#{thread.id}", recursive: true
+        last_response.should be_ok
+        result = parse last_response.body
+        check_thread_result_json(nil, thread, result)
+        check_thread_response_paging_json(thread, result)
+      end
+
+      include_examples "unicode data"
+
+      context "response pagination" do
+
+        before(:each) do
+          User.all.delete
+          Content.all.delete
+          @user = create_test_user(999)
+          @threads = {}
+          @comments = {}
+          [20,10,3,2,1,0].each do |n|
+            thread_key = "t#{n}"
+            thread = make_thread(@user, thread_key, DFLT_COURSE_ID, "pdq")
+            @threads[n] = thread
+            n.times do |i|
+              # generate n responses in this thread
+              comment_key = "#{thread_key} r#{i}"
+              comment = make_comment(@user, thread, comment_key)
+              i.times do |j|
+                subcomment_key = "#{comment_key} c#{j}"
+                subcomment = make_comment(@user, comment, subcomment_key)
+              end
+              @comments[comment_key] = comment
+            end
+          end
+        end
+
+        def thread_result(id, params)
+          get "/api/v1/threads/#{id}", params
+          last_response.should be_ok
+          parse(last_response.body)
+        end
+
+        it "returns all responses when no skip/limit params given" do
+          @threads.each do |n, thread|
+            res = thread_result thread.id, {}
+            check_thread_response_paging_json thread, res
+          end 
+        end
+
+        it "skips the specified number of responses" do
+          @threads.each do |n, thread|
+            res = thread_result thread.id, {:resp_skip => 1}
+            check_thread_response_paging_json thread, res, 1, nil
+          end 
+        end
+
+        it "limits the specified number of responses" do
+          @threads.each do |n, thread|
+            res = thread_result thread.id, {:resp_limit => 2}
+            check_thread_response_paging_json thread, res, 0, 2
+          end 
+        end
+
+        it "skips and limits responses" do
+          @threads.each do |n, thread|
+            res = thread_result thread.id, {:resp_skip => 3, :resp_limit => 5}
+            check_thread_response_paging_json thread, res, 3, 5
+          end 
+        end
+
       end
     end
+
     describe "PUT /api/v1/threads/:thread_id" do
 
       before(:each) { init_without_subscriptions }
@@ -401,11 +473,12 @@ describe "app" do
         changed_thread.body.should == "new body"
         changed_thread.title.should == "new title"
         changed_thread.commentable_id.should == "new_commentable_id"
-        check_thread_result(nil, changed_thread, parse(last_response.body))
+        check_thread_result_json(nil, changed_thread, parse(last_response.body))
       end
       it "returns 400 when the thread does not exist" do
         put "/api/v1/threads/does_not_exist", body: "new body", title: "new title"
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns 503 if the post body has been blocked" do
         thread = CommentThread.first
@@ -414,22 +487,16 @@ describe "app" do
         put "/api/v1/threads/#{thread.id}", body: "blocked,   post...", title: "new title", commentable_id: "new_commentable_id"
         last_response.status.should == 503
       end
-      it "updates tag of comment thread" do
+
+      def test_unicode_data(text)
         thread = CommentThread.first
-        put "/api/v1/threads/#{thread.id}", tags: "haha, hoho, huhu"
+        put "/api/v1/threads/#{thread.id}", body: text, title: text
         last_response.should be_ok
-        thread.reload
-        thread.tags_array.length.should == 3
-        thread.tags_array.should include "haha"
-        thread.tags_array.should include "hoho"
-        thread.tags_array.should include "huhu"
-        put "/api/v1/threads/#{thread.id}", tags: "aha, oho"
-        last_response.should be_ok
-        thread.reload
-        thread.tags_array.length.should == 2
-        thread.tags_array.should include "aha"
-        thread.tags_array.should include "oho"
+        thread.body.should == text
+        thread.title.should == text
       end
+
+      include_examples "unicode data"
     end
     describe "POST /api/v1/threads/:thread_id/comments" do
 
@@ -465,6 +532,7 @@ describe "app" do
       it "returns 400 when the thread does not exist" do
         post "/api/v1/threads/does_not_exist/comments", default_params
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns error when body or course_id does not exist, or when body is blank" do
         post "/api/v1/threads/#{CommentThread.first.id}/comments", default_params.merge(body: nil)
@@ -478,8 +546,18 @@ describe "app" do
         post "/api/v1/threads/#{CommentThread.first.id}/comments", default_params.merge(body: "BLOCKED POST")
         last_response.status.should == 503
       end
+
+      def test_unicode_data(text)
+        thread = CommentThread.first
+        post "/api/v1/threads/#{thread.id}/comments", default_params.merge(body: text)
+        last_response.should be_ok
+        thread.comments.where(body: text).should_not be_empty
+      end
+
+      include_examples "unicode data"
     end
     describe "DELETE /api/v1/threads/:thread_id" do
+      before(:each) { init_without_subscriptions }
       it "delete the comment thread and its comments" do
         thread = CommentThread.first.to_hash
         delete "/api/v1/threads/#{thread['id']}"
@@ -489,49 +567,7 @@ describe "app" do
       it "returns 400 when the thread does not exist" do
         delete "/api/v1/threads/does_not_exist"
         last_response.status.should == 400
-      end
-    end
-  end
-  describe "GET /api/v1/threads/tags" do
-    it "get all tags used in threads" do
-      CommentThread.recalculate_all_context_tag_weights!
-      thread1 = CommentThread.all.to_a.first
-      thread2 = CommentThread.all.to_a.last
-      thread1.tags = "a, b, c"
-      thread1.save
-      thread2.tags = "d, e, f"
-      thread2.save
-      get "/api/v1/threads/tags"
-      last_response.should be_ok
-      tags = parse last_response.body
-      tags.length.should == 6
-    end
-  end
-  describe "GET /api/v1/threads/tags/autocomplete" do
-    def create_comment_thread(tags)
-      c = CommentThread.new(title: "Interesting question", body: "cool")
-      c.course_id = "1"
-      c.author = User.first
-      c.tags = tags
-      c.commentable_id = "1"
-      c.save!
-      c
-    end
-    it "returns autocomplete results" do
-      CommentThread.delete_all
-      CommentThread.recalculate_all_context_tag_weights!
-      create_comment_thread "c++, clojure, common-lisp, c#, c, coffeescript"
-      create_comment_thread "c++, clojure, common-lisp, c#, c"
-      create_comment_thread "c++, clojure, common-lisp, c#"
-      create_comment_thread "c++, clojure, common-lisp"
-      create_comment_thread "c++, clojure"
-      create_comment_thread "c++"
-      get "/api/v1/threads/tags/autocomplete", value: "c"
-      last_response.should be_ok
-      results = parse last_response.body
-      results.length.should == 5
-      %w[c++ clojure common-lisp c# c].each_with_index do |tag, index|
-        results[index].should == tag
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
     end
   end

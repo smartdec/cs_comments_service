@@ -5,8 +5,38 @@ __ http://code.edx.org/
 comment_as_a_service
 ====================
 
-An independent comment system which supports voting and nested comments. It also supports features including instructor endorsement for education-aimed discussion platforms.
+An independent comment system which supports voting and nested comments. It
+also supports features including instructor endorsement for education-aimed
+discussion platforms.
 
+Internationalization and Localization
+----
+
+To run the comments service in a language other than English, set the
+``SERVICE_LANGUAGE`` environment variable to the `language code` for the
+desired language.  Its default value is en-US.
+
+Setting the language has no effect on user content stored by the service.
+However, there are a few data validation messages that may be seen by end
+users via the frontend in edx-platform__.  These will be
+translated to ``SERVICE_LANGUAGE`` assuming a suitable translation file is
+found in the locale/ directory.
+
+__ https://github.com/edx/edx-platform
+
+edX uses Transifex to host translations. To use the Transifex client, be sure
+it is installed (``pip install transifex-client`` will do this for you), and
+follow the instructions here__ to set up your ``.transifexrc`` file.
+
+__ http://support.transifex.com/customer/portal/articles/1000855-configuring-the-client
+
+To upload strings to Transifex for translation when you change the set
+of translatable strings: ``bundle exec rake i18n:push``
+
+To fetch the latest translations from Transifex: ``bundle exec rake i18n:pull``
+
+The repository includes some translations so they will be available
+upon deployment. To commit an update to these: ``bundle exec rake i18n:commit``
 
 License
 -------

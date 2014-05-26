@@ -19,7 +19,7 @@ get "#{APIPREFIX}/search/threads" do
 
   sort_keyword_valid = (!params["sort_key"] && !params["sort_order"] || sort_key && sort_order)
 
-  if (!params["text"] && !params["tags"] && !params["commentable_ids"]) || !sort_keyword_valid
+  if !params["text"] || !sort_keyword_valid
     {}.to_json
   else
     page = (params["page"] || DEFAULT_PAGE).to_i
@@ -33,21 +33,25 @@ get "#{APIPREFIX}/search/threads" do
       per_page: per_page,
     }
 
-    results = CommentThread.perform_search(params, options)
+    result_hash = CommentThread.perform_search(params, options)
+    results = result_hash[:results]
+    total_results = result_hash[:total_results]
 
     if page > results.total_pages #TODO find a better way for this
-      results = CommentThread.perform_search(params, options.merge(page: results.total_pages))
+      result_hash = CommentThread.perform_search(params, options.merge(page: results.total_pages))
+      results = result_hash[:results]
+      total_results = result_hash[:total_results]
     end
 
     if results.length == 0
       collection = []
     else
-      pres_threads = ThreadSearchResultPresenter.new(
+      pres_threads = ThreadSearchResultsPresenter.new(
         results,
         params[:user_id] ? user : nil,
         params[:course_id] || results.first.course_id
       )
-      collection = pres_threads.to_hash_array(bool_recursive)
+      collection = pres_threads.to_hash
     end
 
     num_pages = results.total_pages
@@ -56,6 +60,7 @@ get "#{APIPREFIX}/search/threads" do
     self.class.trace_execution_scoped(['Custom/get_search_threads/json_serialize']) do
       json_output = {
         collection: collection,
+        total_results: total_results,
         num_pages: num_pages,
         page: page,
       }.to_json
@@ -94,16 +99,4 @@ get "#{APIPREFIX}/search/threads/recent_active" do
   end
 
   comment_threads.where(query_params.merge(:last_activity_at => {:$gte => from_time})).order_by(:last_activity_at.desc).limit(5).to_a.map(&:to_hash).to_json
-end
-
-
-get "#{APIPREFIX}/search/tags/trending" do
-  query_params = {}
-  query_params["course_id"] = params["course_id"] if params["course_id"]
-  query_params["commentable_id"] = params["commentable_id"] if params["commentable_id"]
-  CommentThread.where(query_params).only(:tags_array).to_a
-               .map(&:tags_array).flatten.group_by{|x| x}
-               .map{|k, v| [k, v.count]}
-               .sort_by {|x| - x.last}[0..4]
-               .to_json
 end

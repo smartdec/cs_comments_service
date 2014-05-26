@@ -34,7 +34,12 @@ end
 
 describe "app" do
   describe "abuse" do
-    before(:each) { init_without_subscriptions }
+
+    before(:each) do
+      init_without_subscriptions
+      set_api_key_header
+    end
+
     describe "flag a comment as abusive" do
       it "create or update the abuse_flags on the comment" do
         comment = Comment.first
@@ -52,10 +57,12 @@ describe "app" do
       it "returns 400 when the comment does not exist" do
         create_comment_flag("does_not_exist", User.first.id)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns 400 when user_id is not provided" do
         create_comment_flag("#{Comment.first.id}", nil)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:user_id_is_required)
       end
       #Would like to test the output of to_hash, but not sure how to deal with a Moped::BSON::Document object
       #it "has a correct hash" do
@@ -78,10 +85,12 @@ describe "app" do
       it "returns 400 when the thread does not exist" do
         create_thread_flag("does_not_exist", User.first.id)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns 400 when user_id is not provided" do
         create_thread_flag("#{Comment.first.comment_thread.id}", nil)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:user_id_is_required)
       end
       #Would like to test the output of to_hash, but not sure how to deal with a Moped::BSON::Document object
       #it "has a correct hash" do
@@ -106,13 +115,20 @@ describe "app" do
         comment.abuse_flaggers.count.should == prev_abuse_flaggers_count - 1 
         comment.abuse_flaggers.to_a.should_not include User.first.id
       end
-      it "returns 400 when the thread does not exist" do
+      it "returns 400 when the comment does not exist" do
         remove_comment_flag("does_not_exist", User.first.id)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
+      end
+      it "returns 400 when the thread does not exist" do
+        remove_thread_flag("does_not_exist", User.first.id)
+        last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns 400 when user_id is not provided" do
-        remove_comment_flag("#{Comment.first.comment_thread.id}", nil)
+        remove_thread_flag("#{Comment.first.comment_thread.id}", nil)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:user_id_is_required)
       end
       #Would like to test the output of to_hash, but not sure how to deal with a Moped::BSON::Document object
       #it "has a correct hash" do
@@ -140,10 +156,12 @@ describe "app" do
       it "returns 400 when the thread does not exist" do
         remove_thread_flag("does_not_exist", User.first.id)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns 400 when user_id is not provided" do
         remove_thread_flag("#{Comment.first.comment_thread.id}", nil)
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:user_id_is_required)
       end
       #Would like to test the output of to_hash, but not sure how to deal with a Moped::BSON::Document object
       #it "has a correct hash" do

@@ -2,11 +2,16 @@ require 'spec_helper'
 
 describe "app" do
   describe "notifications" do
-    before(:each) { init_without_subscriptions }
+
+    before(:each) do
+      init_without_subscriptions
+      set_api_key_header
+    end
+
     describe "POST /api/v1/notifications" do
       it "returns notifications by class and user" do
         start_time = Time.now
-        user = User.create(:email => "test@example.com",:external_id => 1,:username => "example")
+        user = User.create(:external_id => 1,:username => "example")
         commentable = Commentable.new("question_1")
         random_string = (0...8).map{ ('a'..'z').to_a[rand(26)] }.join
         thread = CommentThread.new(title: "Test title", body: "elephant otter", course_id: "1", commentable_id: commentable.id, comments_text_dummy: random_string)
@@ -37,7 +42,7 @@ describe "app" do
 
         # first make a dummy thread and comment and a subscription
         commentable = Commentable.new("question_1")
-        user = User.create(:email => "test@example.com",:external_id => 1,:username => "example")
+        user = User.create(:external_id => 1,:username => "example")
         random_string = (0...8).map{ ('a'..'z').to_a[rand(26)] }.join
 
         thread = CommentThread.new(title: "Test title", body: "elephant otter", course_id: "1", commentable_id: commentable.id, comments_text_dummy: random_string)
@@ -80,7 +85,7 @@ describe "app" do
         start_time = Date.today - 100.days
        
 
-        user = User.create(:email => "test@example.com",:external_id => 1,:username => "example")
+        user = User.create(:external_id => 1,:username => "example")
 
         sleep 1
 

@@ -11,30 +11,44 @@ get "#{APIPREFIX}/threads" do # retrieve threads by course
 end
 
 get "#{APIPREFIX}/threads/:thread_id" do |thread_id|
-  thread = CommentThread.find(thread_id)
+  begin
+    thread = CommentThread.find(thread_id)
+  rescue Mongoid::Errors::DocumentNotFound
+    error 404, [t(:requested_object_not_found)].to_json
+  end
 
   if params["user_id"] and bool_mark_as_read
     user = User.only([:id, :username, :read_states]).find_by(external_id: params["user_id"])
     user.mark_as_read(thread) if user
   end
 
-  presenter = ThreadPresenter.new([thread], user || nil, thread.course_id)
-  presenter.to_hash_array(true).first.to_json
+  presenter = ThreadPresenter.factory(thread, user || nil)
+  if params.has_key?("resp_skip")
+    unless (resp_skip = Integer(params["resp_skip"]) rescue nil) && resp_skip >= 0
+      error 400, [t(:param_must_be_a_non_negative_number, :param => 'resp_skip')].to_json
+    end
+  else
+    resp_skip = 0
+  end
+  if params["resp_limit"]
+    unless (resp_limit = Integer(params["resp_limit"]) rescue nil) && resp_limit >= 0
+      error 400, [t(:param_must_be_a_number_greater_than_zero, :param => 'resp_limit')].to_json
+    end
+  else
+    resp_limit = nil
+  end
+  presenter.to_hash(true, resp_skip, resp_limit).to_json
 end
 
 put "#{APIPREFIX}/threads/:thread_id" do |thread_id|
   thread.update_attributes(params.slice(*%w[title body closed commentable_id group_id]))
   filter_blocked_content thread
-  if params["tags"]
-    thread.tags = params["tags"]
-    thread.save
-  end
 
   if thread.errors.any?
     error 400, thread.errors.full_messages.to_json
   else
-    presenter = ThreadPresenter.new([thread], nil, thread.course_id)
-    presenter.to_hash_array.first.to_json
+    presenter = ThreadPresenter.factory(thread, nil)
+    presenter.to_hash.to_json
   end
 end
 

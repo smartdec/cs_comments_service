@@ -1,6 +1,10 @@
 require 'spec_helper'
+require 'unicode_shared_examples'
 
 describe "app" do
+
+  before(:each) { set_api_key_header }
+
   describe "comments" do
     before(:each) { init_without_subscriptions }
     describe "GET /api/v1/comments/:comment_id" do
@@ -37,7 +41,18 @@ describe "app" do
       it "returns 400 when the comment does not exist" do
         get "/api/v1/comments/does_not_exist"
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
+
+      def test_unicode_data(text)
+        comment = make_comment(User.first, CommentThread.first, text)
+        get "/api/v1/comments/#{comment.id}"
+        last_response.should be_ok
+        retrieved = parse last_response.body
+        retrieved["body"].should == text
+      end
+
+      include_examples "unicode data"
     end
     describe "PUT /api/v1/comments/:comment_id" do
       it "update information of the comment" do
@@ -51,12 +66,23 @@ describe "app" do
       it "returns 400 when the comment does not exist" do
         put "/api/v1/comments/does_not_exist", body: "new body", endorsed: true
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns 503 when the post hash is blocked" do
         comment = Comment.first
         put "/api/v1/comments/#{comment.id}", body: "BLOCKED POST", endorsed: true
         last_response.status.should == 503
+        parse(last_response.body).first.should == I18n.t(:blocked_content_with_body_hash, :hash => Digest::MD5.hexdigest("blocked post"))
       end
+
+      def test_unicode_data(text)
+        comment = Comment.first
+        put "/api/v1/comments/#{comment.id}", body: text
+        last_response.should be_ok
+        comment.body.should == text
+      end
+
+      include_examples "unicode data"
     end
     describe "POST /api/v1/comments/:comment_id" do
       it "create a sub comment to the comment" do
@@ -73,13 +99,24 @@ describe "app" do
       it "returns 400 when the comment does not exist" do
         post "/api/v1/comments/does_not_exist", body: "new comment", course_id: "1", user_id: User.first.id
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
       it "returns 503 when the post hash is blocked" do
         comment = Comment.first.to_hash(recursive: true)
         user = User.first
         post "/api/v1/comments/#{comment["id"]}", body: "BLOCKED POST", course_id: "1", user_id: User.first.id
         last_response.status.should == 503
+        parse(last_response.body).first.should == I18n.t(:blocked_content_with_body_hash, :hash => Digest::MD5.hexdigest("blocked post"))
       end
+
+      def test_unicode_data(text)
+        parent = Comment.first
+        post "/api/v1/comments/#{parent.id}", body: text, course_id: parent.course_id, user_id: User.first.id
+        last_response.should be_ok
+        parent.children.where(body: text).should_not be_empty
+      end
+
+      include_examples "unicode data"
     end
     describe "DELETE /api/v1/comments/:comment_id" do
       it "delete the comment and its sub comments" do
@@ -90,9 +127,18 @@ describe "app" do
         Comment.count.should == prev_count - cnt_comments
         Comment.all.select{|c| c.id == comment.id}.first.should be_nil
       end
+      it "can delete a sub comment" do
+        parent = CommentThread.first.comments.first
+        sub_comment = parent.children.first
+        id = sub_comment.id
+        delete "/api/v1/comments/#{id}"
+        Comment.where(:id => id).should be_empty
+        parent.children.where(:id => id).should be_empty
+      end
       it "returns 400 when the comment does not exist" do
         delete "/api/v1/comments/does_not_exist"
         last_response.status.should == 400
+        parse(last_response.body).first.should == I18n.t(:requested_object_not_found)
       end
     end
   end
